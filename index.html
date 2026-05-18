@@ -12,6 +12,7 @@
 		<link rel="stylesheet" href="dist/reset.css" />
 		<link rel="stylesheet" href="dist/reveal.css" />
 		<link rel="stylesheet" href="dist/theme/black.css" />
+		<link rel="stylesheet" href="css/custom.css">
 
 		<!-- Theme used for syntax highlighted code -->
 		<link rel="stylesheet" href="dist/plugin/highlight/monokai.css" />
@@ -19,8 +20,13 @@
 	<body>
 		<div class="reveal">
 			<div class="slides">
-				<section>Slide 1</section>
-				<section>Slide 2</section>
+				<section
+            data-markdown="slides.md"
+            data-separator="^\n\n\n"
+            data-separator-vertical="^\n\n"
+            data-separator-notes="^Notes:"
+            data-charset="utf-8">
+        </section>
 			</div>
 		</div>
 
@@ -37,6 +43,27 @@
 
 				// Learn about plugins: https://revealjs.com/plugins/
 				plugins: [RevealMarkdown, RevealHighlight, RevealNotes],
+			});
+
+			// Show the first fragment right away,
+			// if it has a `preload` class.
+			// from https://github.com/hakimel/reveal.js/issues/1784
+			//
+			// automatically load the initial fragment on a slide if the fragment
+			// has been defined with the 'preload' class
+			Reveal.addEventListener('slidechanged', function(event) {
+				if (event.currentSlide.querySelectorAll('.preload[data-fragment-index="0"]').length > 0) {
+					Reveal.nextFragment();
+				}
+			});
+			// if the initial fragment on a slide has been defined with a 'preload' class
+			// then transition to the previous slide if the fragment is hidden
+			Reveal.addEventListener('fragmenthidden', function(event) {
+				if (event.fragment.hasAttribute('data-fragment-index') && event.fragment.classList.contains('preload')) {
+					if (event.fragment.attributes['data-fragment-index'].value == "0") {
+						Reveal.prev();
+					}
+				}
 			});
 		</script>
 	</body>

@@ -1,0 +1,9 @@
+.reveal figure > img {
+  margin-bottom: 0;
+}
+.reveal figure > figcaption {
+  font-size: 80%;
+}
+.references ul {
+  font-size: 35%;
+}
