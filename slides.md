@@ -9,6 +9,7 @@ PGConf.dev 2026
 Notes:
 
 - Hi, I'm Paul Jungwirth, a freelance programmer from Portland, Oregon.
+- I mostly build webapps, but sometimes I get to work on Postgres.
 - I've been working on adding support for SQL:2011 temporal features to Postgres, in particular application time.
 - I want to talk about what we have, what's coming in v19, and most of all what else we could do.
 
@@ -85,7 +86,7 @@ Notes:
 - This might be useful for geometric types like Box or the types from PostGIS.
   - This feature can be useful for more than just time.
   - Or as we'll see later, I have my own use-case for multiple temporal dimensions.
-- For a primary key or unique constraint, we are almost there. It just needs an overlaps operator.
+- For a primary key or unique constraint, we are almost there. The main fill-in-the-blank core needs is an overlaps operator.
   - The issue is that core needs to ask the opclass for its overlaps operator.
   - In theory that's what strategy numbers are for, but those are only fixed for btree.
     - A GiST opclass can use whatever numbers it wants.
@@ -160,7 +161,8 @@ Notes:
     - The standard also says you shouldn't allow empty---or equivalently, the end has to come after the beginning. So I think we are looking for a generalization of that rule.
   - Alternately we could put the onus on the user to forbid these records manually, e.g. with a domain or check constraint.
     - But would users always get it right? It seems like a footgun.
-    - I realized just last month we could have done this ourselves, by forbidding WITHOUT OVERLAPS constraints on ordinary ranges, and allowing domains that forbid empties.
+    - I realized just last month we could have done this ourselves, by forbidding WITHOUT OVERLAPS constraints on ordinary ranges, and only allowing domains that forbid empties.
+      - Postgres doesn't come with many out-of-the-box, but there are a few.
       - I like how that builds on existing generic features.
       - Maybe it would be too hard to check or annoying to use.
 
@@ -508,7 +510,7 @@ Notes:
 
 # Encapsulating
 
-```sql
+```sql[|6|]
 SELECT  a, b
 FROM    temporal_semijoin(
           'a', 'id', 'valid_at',
@@ -526,7 +528,7 @@ Notes:
 - Here's the problem: this can't be a SQL function; it has to be PL/pgSQL or something similar.
   And those functions are opaque to the planner.
   Since the planner knows SQL, it can inline a SQL function and then do normal optimizations.
-  Most important, it can push a qual down into the subquery, like this line here.
+  Most important, it can push a qual down into the subquery, like this line here. [SHOW]
   With an opaque function definition, it can't do that.
   So this function will join every row in both tables, and then throw most of it away.
 - That's no good either!
@@ -581,6 +583,8 @@ Notes:
   But doing it this way makes things easy, and it lets you share code between the main function and support function.
   It offers a way for people to use the feature without being full-fledged Postgres contributors.
   Maybe there is even a way to define a general-purpose support function here, written in C, that delegates to yet another function just for building the string, and that could be in PL/pgSQL.
+  - Then cloud users could take advantage of it.
+  - The nicest way is probably to give arguments to support functions, as you can with triggers.
 
 
 
@@ -874,6 +878,7 @@ Notes:
     but it is only used to speed up the initial index build.
     Still, if GiST indexes can use that to preserve sorting as they evolve,
     then binary search should be possible.
+  - This also (possibly) relates to work I'm doing to let GiST indexes support uniqueness.
 
 
 
@@ -1030,8 +1035,6 @@ Notes:
     and `b.valid_at` contains `current_date`.
 - And btw this identity only holds if `t` is a base type.
   - If `t` is another range, then it might be `'empty'`, and that messes things up.
-  - It makes me think we should have an out-of-the-box domain type for non-empty ranges and multiranges.
-    - We could have used that for primary keys.
 - Is it realistic to build these rules into the planner? I don't know.
 
 
@@ -1058,7 +1061,8 @@ Notes:
   - System time is about the database.
   - Application time is about the thing in the world.
   - This is about who was talking about the thing in the world.
-  - If anyone here has read Heidegger, we should get a beer.
+  - If relational theory comes from Aristotle, now we're on Heidegger.
+    - If that is interesting to you, let's get a beer.
 - Well, circling back to the beginning, if we supported arbitrary types, everything is there already.
 - Imagine you have a new type called mdrange.
   - That's md for multi-dimensional.
