@@ -975,17 +975,66 @@ Notes:
     - So now the scalar parts of your temporal constraints are alone sufficient to guarantee uniqueness.
   - I'm sure there are missed optimization opportunities here.
     - It's a new feature; there should be a lot of low-hanging fruit.
-    - For instance index statistics track `n_distinct`.
-      - Temporal indexes could track `n_scalar_distinct`, which is the same thing but ignoring the valid-time column.
-      - Then if we have a snapshot query we could use that.
-      - Or we could compute `n_distinct` just for the current time as of running analysis,
-        since that will usually be what gets queried.
-      - Or we could have multiple `n_distinct` values for different time spans, so it's accurate for whatever time you're targeting.
-  - And the improvements are not limited just to optimizations:
-    - Here's one: functional dependencies in aggregate queries.
-      - When you `GROUP BY`, you're allowed to select non-grouping columns if Postgres can prove that they are "functionally dependent" on the grouping columns.
-        - For instance if I group by product id (say because I'm joining to all its sales), I can still select the product name.
-      - In a snapshot query, that should still work, even though of course I'm not grouping by the valid-time.
+
+
+
+# Snapshot Queries
+
+```c[1,10]
+static struct StatsArgInfo attarginfo[] =                                                          
+{                                                                                                  
+  [ATTRELSCHEMA_ARG] = {"schemaname", TEXTOID},                                                  
+  [ATTRELNAME_ARG] = {"relname", TEXTOID},                                                       
+  [ATTNAME_ARG] = {"attname", TEXTOID},                                                          
+  [ATTNUM_ARG] = {"attnum", INT2OID},                                                            
+  [INHERITED_ARG] = {"inherited", BOOLOID},                                                      
+  [NULL_FRAC_ARG] = {"null_frac", FLOAT4OID},                                                    
+  [AVG_WIDTH_ARG] = {"avg_width", INT4OID},                                                      
+  [N_DISTINCT_ARG] = {"n_distinct", FLOAT4OID},                                                  
+  [MOST_COMMON_VALS_ARG] = {"most_common_vals", TEXTOID},                                        
+  [MOST_COMMON_FREQS_ARG] = {"most_common_freqs", FLOAT4ARRAYOID},                               
+  [HISTOGRAM_BOUNDS_ARG] = {"histogram_bounds", TEXTOID},                                        
+  [CORRELATION_ARG] = {"correlation", FLOAT4OID},                                                
+  [MOST_COMMON_ELEMS_ARG] = {"most_common_elems", TEXTOID},                                      
+  [MOST_COMMON_ELEM_FREQS_ARG] = {"most_common_elem_freqs", FLOAT4ARRAYOID},                     
+  [ELEM_COUNT_HISTOGRAM_ARG] = {"elem_count_histogram", FLOAT4ARRAYOID},                         
+  [RANGE_LENGTH_HISTOGRAM_ARG] = {"range_length_histogram", TEXTOID},                            
+  [RANGE_EMPTY_FRAC_ARG] = {"range_empty_frac", FLOAT4OID},                                      
+  [RANGE_BOUNDS_HISTOGRAM_ARG] = {"range_bounds_histogram", TEXTOID},                            
+  [NUM_ATTRIBUTE_STATS_ARGS] = {0}                                                               
+};  
+```
+
+Notes:
+
+- For instance index statistics track `n_distinct`.
+  - Temporal indexes could track `n_scalar_distinct`, which is the same thing but ignoring the valid-time column.
+  - Then if we have a snapshot query we could use that.
+  - Or we could compute `n_distinct` just for the current time as of running analysis,
+    since that will usually be what gets queried.
+  - Or we could have multiple `n_distinct` values for different time spans, so it's accurate for whatever time you're targeting.
+
+
+
+# Snapshot Queries
+
+```sql
+SELECT  p.id, p.name, COUNT(v.id)
+FROM    products p
+JOIN    variants v
+  ON    v.product_id = p.id
+  AND   v.valid_at @> NOW()
+WHERE   p.valid_at @> NOW()
+GROUP BY p.id
+```
+
+Notes:
+
+- And the improvements are not limited just to optimizations:
+  - Here's one: functional dependencies in aggregate queries.
+    - When you `GROUP BY`, you're allowed to select non-grouping columns if Postgres can prove that they are "functionally dependent" on the grouping columns.
+      - For instance if I group by product id (say because I'm joining to all its variants), I can still select the product name.
+    - In a snapshot query, that should still work, even though of course I'm not grouping by the valid-time.
 
 - The common pattern here is that in a snapshot query, the temporal primary key "decays" to a primary key with just its scalar columns.
 
