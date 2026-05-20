@@ -10,7 +10,8 @@ Notes:
 
 - Hi, I'm Paul Jungwirth, a freelance programmer from Portland, Oregon.
 - I mostly build webapps, but sometimes I get to work on Postgres.
-- I've been working on adding support for SQL:2011 temporal features to Postgres, in particular application time.
+- Honestly coming to this conference is the highlight of my year.
+- I've been working on SQL:2011 temporal features for several years, in particular application time.
 - I want to talk about what we have, what's coming in v19, and most of all what else we could do.
 
 
@@ -87,11 +88,12 @@ Notes:
   - This feature can be useful for more than just time.
   - Or as we'll see later, I have my own use-case for multiple temporal dimensions.
 - For a primary key or unique constraint, we are almost there. The main fill-in-the-blank core needs is an overlaps operator.
-  - The issue is that core needs to ask the opclass for its overlaps operator.
+  - The issue is that core needs to ask the opclass for that operator.
   - In theory that's what strategy numbers are for, but those are only fixed for btree.
     - A GiST opclass can use whatever numbers it wants.
+    - In fact core and our own `btree_gist` use different numbering schemes.
     - So we added a new gist support function for that.
-    - Core asks the opclasses what stratnum implements a given "compare type".
+    - So we ask the opclasses what stratnum implements a given "compare type".
 
 
 
@@ -162,9 +164,10 @@ Notes:
   - Alternately we could put the onus on the user to forbid these records manually, e.g. with a domain or check constraint.
     - But would users always get it right? It seems like a footgun.
     - I realized just last month we could have done this ourselves, by forbidding WITHOUT OVERLAPS constraints on ordinary ranges, and only allowing domains that forbid empties.
-      - Postgres doesn't come with many out-of-the-box, but there are a few.
+      - Postgres doesn't come with many domains out-of-the-box, but there are a few.
       - I like how that builds on existing generic features.
       - Maybe it would be too hard to check or annoying to use.
+      - And it's complicated because a range isn't a type. The types are daterange, int4range, etc.
 
 
 
@@ -189,6 +192,7 @@ typedef struct RI_ConstraintInfo
 
 Notes:
 
+- Okay, foreign keys!
 - Foreign keys also don't *quite* support arbitrary types, although I wish they did.
 - They are so close. Already almost everything we need in core is provided by operators or support functions.
 - The missing piece is an intersect operator.[SHOW]
@@ -298,9 +302,9 @@ UPDATE t FOR PORTION OF valid at
 
 Notes:
 
-- The second things we need is a way to get leftovers.
+- The second thing we need is a way to get leftovers.
   - The standard says we insert extra rows to cover that history.
-    - I call these new records "leftovers".
+    - I call these new records "temporal leftovers".
     - It's basically range minus, except range minus fails if you cut a range into two parts.
     - So we have a helper function that does the same thing, but as a set-returning function.
       - It's called `range_minus_multi`.
@@ -360,6 +364,7 @@ Notes:
 - But if we just starting passing that, every existing implementation would miss it.
   - It would do a regular update instead of a temporal update.
 - So I think we need a way for an implementation to assert what it's able to handle.
+  - It could be like the properties `canorder`, `canmerge`, etc. on IAMs and indexes.
   - Maybe this exists already for FDWs; I haven't checked yet.
 - I feel like FDW support is pretty easy, but it just needs a transition plan.
 
@@ -575,7 +580,7 @@ appendStringInfo(&q,
 
 Notes:
 
-- Here is a snippet from that support function.
+- Here is a snippet from my support function in `temporal_ops`.
   - It's one of the nastiest parts I could find.
 - Actually the support function and the main function share the same SQL-generating code,
   so we can be pretty sure they are equivalent.
@@ -620,8 +625,10 @@ WHERE   a.id = 5;
 
 Notes:
 
-- Here the function is technically a predicate, but it's more like a declaration to a planner hook to rewrite this join.
-- I don't know yet.
+- Here the function is technically a predicate, but it's more like a declaration, so a post-analyze hook can rewrite the join.
+- Now I don't need to use strings.
+- I'm still figuring this out.
+- I think we might need some kind of node type id just for extensions, so that they can survive various switch statements that error on nodes they don't recognize.
 
 
 
@@ -643,12 +650,13 @@ typedef struct CustomScan
 
 Notes:
 
-- So SQL implementations are nice, because they give our users instant gratification.
-  - But eventually it would be awesome to have a dedicated executor node.
-    Then we could really think about an optimal algorithm for getting what we want.
-- One way for an extension to achieve that might be a CustomScan.
-  - I've just barely started looking into this.
-  - I expect the fatal flaw will be adding an extra column for the result valid-time.
+- That sounds a bit like a CustomScan!
+  - Instead of transforming SQL, we could directly apply an optimal algorithm for getting what we want.
+- I suspect there are two problems here:
+  - Is the analyze phase is too early to inject CustomScans and CustomPaths?
+  - Also, a CustomPath gives the planner an alternative to make something faster, but we need to add an extra output column.
+  - Still, maybe we add the column in analysis and make sure the only path is from our CustomScan.
+  - I'm sure other people have done similar things here, but I haven't yet looked at their work.
 
 
 
@@ -684,13 +692,14 @@ Notes:
 - Coming back to this new extra column, how do you give it a name?
   - This is a syntax question.
 - Here I'm showing two things:
-  - First, note I'm using `LEFT JOIN` on purpose [SHOW], which implies a lot more work behind the scenes.
+  - First, note I'm using `LEFT JOIN` on purpose [SHOW], because as we saw, that's the hardest to do yourself in SQL.
   - Maybe `USING` [SHOW] has a `PERIOD` keyword and will use overlaps instead of equality.
   - And then maybe in the column list [SHOW] you can also use `PERIOD` to be the intersection of the two valid times.
     - You'd really like to get this without conflicting with the original valid-times.
     - Those are useful in aggregate functions, and probably they have other uses too.
       - Who knows what the user will do with them.
 - With my PL/pgSQL functions, it wasn't an issue, because (1) I was returning separate rowtype values for the left & right inputs (2) the user has to give a column definition list as part of the FROM alias, so they can name the result valid-time whatever they want.
+- Btw semijoin and antijoin are even worse as far as syntax, since SQL can't even do the *ordinary* operators without a periphrasis.
 
 
 
@@ -718,8 +727,8 @@ Notes:
     - It turns out there are a ton of papers from that era proposing different temporal relational algebras.
       - They might treat time as bounded or unbounded, discrete or continuous, linear or branching.
       - They might structure the tuples with intervals, or sets of chronons, maybe even a different set of chronons for each attribute.
-      - Even back then, people were struggling to compare the different systems,
-        and there are proofs about how one system is at least as powerful as another.
+      - I found a paper from 1990 complaining about all the diversity.
+      - People were publishing proofs about how one system is at least as powerful as another.
 - In Snodgrass's system, if you define temporal relational operators, most rules are the same, but not all of them.
   - For instance Cartesian product does not distribute over difference.
   - And Dignös points out here that selection does not distribute over joins.
@@ -756,7 +765,7 @@ Notes:
 - I made a little Racket library to play around with relational operators.
   - The github repo is in the references at the end.
 - Here is the invalid identity Snodgrass points out.
-- I'm not sure, but I think the problem is how the result keeps the old valid-times.
+- I think the problem is how the result keeps the old valid-times.
   - It treats them like they were ordinary attributes, but they are more like meta-attributes.
   - Ironically this was one of the big criticisms of an earlier SQL standardization effort.
   - And one of the important aspects in Dignös's work is precisely that operators yield a new valid-time while preserving the old, which is useful in scaling aggregate functions.
@@ -819,6 +828,7 @@ MERGE INTO products
 
 Notes:
 
+- Moving on....
 - A temporal merge command would be so useful!
 - As an application programmer, what you really want is a way to say, "P is true from t1 to t2,"
   and the database updates the existing history and *also* fills in any gaps with new rows.
@@ -850,7 +860,7 @@ Notes:
 
 Notes:
 
-- There are lots of optimization opportunities.
+- Then there are lots of optimization opportunities.
 - What are we giving up by using GiST indexes instead of B-Tree? I need to benchmark, but I suspect it's a lot.
   - Can we support temporal constraints backed by a B-Tree index?
     - I feel like there is some affinity with skip scans here, but so far it's just a vague feeling.
@@ -936,12 +946,14 @@ Notes:
     - I think most temporal joins are going to need Overlaps.
   - The Dignös join has very impressive benchmarks compared to GiST. On the other hand not using GiST is sort of a problem for us.
   - Jeff's patch is far more commit-ready.
+  - The Mannhart patch is maybe more sophisticated in how it generates paths.
 - Here is the outstanding problem that made Jeff abandon his patch:
   - If you are dealing with *two* ranges, you can't get an opclass to give you the sorting you need.
   - He mentioned spatial, but I don't think anyone is going to use rangetypes for that.
     GIS has its own types; it doesn't use range types.
     A two-dimensional type doesn't have the problem he describes here: the opclass can see both dimensions at once.
-  - OTOH it might matter for bitemporal tables.
+    It would still need an ordering that is consistent with overlaps; I'm just starting to think about that.
+  - Two rangetypes might matter for bitemporal tables.
     - But probably not, IMO: (1) just finding each range's overlaps independently doesn't get you all the way there anyway (2) usually you want to filter by one range and join by the other. So I'm not sure that's really a use-case.
   - The Thomas and Dignös method doesn't solve this either, btw.
 
@@ -1002,17 +1014,14 @@ Notes:
 
 Notes:
 
-- Even outside a Snapshot context, there is low-hanging fruit.
-- A temporal primary key is *at least as strict* as a regular primary key,
-  so we can apply uniqueness optimizations.
-  - But it's a GiST index, and a lot of our code only looks for btree indexes.
-- Here is a recent patch for Self-Join Elimination.
+- And I wanted to call out this patch from just a few weeks ago.
+  - We miss an opportunity for self-join elimination because the primary key is GiST, not btree.
 
 
 
 # More Algebra
 
-(a * b) @> t = (a @> t AND b @> t)
+`(a * b) @> t = (a @> t AND b @> t)`
 <!-- .element: style="text-align:center" -->
 
 ```sql
@@ -1062,20 +1071,12 @@ Notes:
   - Application time is about the thing in the world.
   - This is about who was talking about the thing in the world.
   - If relational theory comes from Aristotle, now we're on Heidegger.
-    - If that is interesting to you, let's get a beer.
 - Well, circling back to the beginning, if we supported arbitrary types, everything is there already.
 - Imagine you have a new type called mdrange.
   - That's md for multi-dimensional.
 - It contains all its own logic about how to do overlaps, intersects, minus-multi, etc.
   - Recall how for RangeMergeJoin, the problem was that an opclass can't consider two dimensions at once to do its ordering, but with a single `mdrange` value it could.
-  - Honestly I think we should accept Jeff's old patch as-is.
-    - He was worried about spatial types, not my ivory tower assertion-time scenario, but in a spatial type you also have *one value*, so the opclass sees all dimensions at once.
-    - But his patch hardcodes just rangetypes, and again it'd be much cooler if it worked for any type the user wants.
-- An `mdrange` also means you don't need any new syntax for existing temporal features.
-  - Our `FOR PORTION OF` already has a special syntax for multiranges, where instead of saying `FROM` and `TO`, you give a multirange.
-  - So to update an `mdrange` table you could target an `mdrange`.
-- This is probably not super-practical, but you could build it, and bring to life this thing that every temporal author has asked for.
-- I'm totally planning to write an extension for mdranges, but it might be a couple years before I get around to it.
+- This is pretty ivory tower, but I still want to build an extension for it.
 
 
 
@@ -1131,7 +1132,7 @@ Notes:
   - With application time, migrating old data is the user's job.
   - With system time, it's our job.
   - Corey and I have had several conversations about how to deal with it.
-  - You'd like to think a database could handle every situation . . .
+  - You'd like to think databases could handle every situation . . .
 
 
 
