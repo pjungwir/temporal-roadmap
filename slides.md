@@ -955,7 +955,7 @@ Notes:
     It would still need an ordering that is consistent with overlaps; I'm just starting to think about that.
   - Two rangetypes might matter for bitemporal tables.
     - But probably not, IMO: (1) just finding each range's overlaps independently doesn't get you all the way there anyway (2) usually you want to filter by one range and join by the other. So I'm not sure that's really a use-case.
-  - The Thomas and Dignös method doesn't solve this either, btw.
+  - The Mannhart and Dignös method doesn't solve this either, btw.
 
 
 
