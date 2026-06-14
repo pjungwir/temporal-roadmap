@@ -662,7 +662,7 @@ Notes:
 
 # In Core?
 
-![Temporal Alignment Query Rewriting](/img/temporal_alignment_rewriting.png) <!-- .element style="width:100%" -->
+![Temporal Alignment Query Rewriting](img/temporal_alignment_rewriting.png) <!-- .element style="width:100%" -->
 
 Notes:
 
@@ -802,7 +802,7 @@ Notes:
 
 # Aggregates
 
-![scaling inputs to temporal aggregages](/img/scaling_aggregates.png) <!-- .element style="width:100%" -->
+![scaling inputs to temporal aggregages](img/scaling_aggregates.png) <!-- .element style="width:100%" -->
 
 Notes:
 
